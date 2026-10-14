@@ -1,96 +1,93 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useLocation } from "react-router-dom";
 
-
 const API_BASE = (
-    import.meta.env.VITE_API_URL ||
-    "https://farm-backend-nhke.onrender.com"
+    import.meta.env.VITE_API_URL || "https://farm-backend-nhke.onrender.com"
 ).replace(/\/+$/, "");
 
-function getFarmerId() {
-    const keys = [
-        "user",
-        "currentUser",
-        "loggedInUser",
-        "farmer",
-        "userData"
+const STORAGE_KEYS = ["user", "currentUser", "loggedInUser", "farmer", "userData"];
+
+function getIdFromUser(user) {
+    if (!user || typeof user !== "object") return null;
+
+    const candidates = [
+        user.farmerId, user.userId, user.id,
+        user.user?.farmerId, user.user?.userId, user.user?.id,
+        user.data?.farmerId, user.data?.userId, user.data?.id
     ];
 
-    for (const storage of [sessionStorage, localStorage]) {
-        for (const key of keys) {
-            try {
-                const raw = storage.getItem(key);
-                if (!raw) continue;
-
-                const user = JSON.parse(raw);
-
-                const id =
-                    user?.farmerId ??
-                    user?.userId ??
-                    user?.id;
-
-                if (id !== undefined && id !== null && id !== "") {
-                    return Number(id);
-                }
-            } catch {
-                // Ignore invalid storage values and try the next key.
-            }
+    for (const value of candidates) {
+        if (value !== undefined && value !== null && String(value).trim() !== "") {
+            const id = Number(value);
+            if (Number.isFinite(id) && id > 0) return id;
         }
     }
-
     return null;
 }
 
-function newMessage(role, text, extra = {}) {
-    return {
-        id: `${Date.now()}-${Math.random()}`,
-        role,
-        text,
-        ...extra
-    };
+function getStoredUser() {
+    for (const storage of [sessionStorage, localStorage]) {
+        for (const key of STORAGE_KEYS) {
+            try {
+                const raw = storage.getItem(key);
+                if (!raw) continue;
+                const parsed = JSON.parse(raw);
+                if (getIdFromUser(parsed) !== null) return parsed;
+            } catch {
+                // Try the next key.
+            }
+        }
+    }
+    return null;
+}
+
+function newMessage(role, text) {
+    return { id: `${Date.now()}-${Math.random()}`, role, text };
 }
 
 export default function FarmerAssistantWidget() {
     const location = useLocation();
+    const routeUser = location.state?.user ?? null;
 
     const [isOpen, setIsOpen] = useState(false);
     const [input, setInput] = useState("");
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState("");
     const [conversationId, setConversationId] = useState(null);
-
+    const [pendingAction, setPendingAction] = useState(null);
     const [messages, setMessages] = useState([
         newMessage(
             "assistant",
-            "Namaste! 🌱 I'm your Farmer Assistant.\n\n" +
-            "You can ask about your crops, record expenses, " +
-            "list products, or record a harvest."
+            "Namaste! 🌱 I'm your Farmer Assistant.\n\nYou can ask about your crops, record expenses, list products, or record a harvest."
         )
     ]);
 
-    const [pendingAction, setPendingAction] = useState(null);
+    // Prefer the user passed by React Router. Mirror it to storage to keep
+    // the same farmer ID when navigating to other farmer pages.
+    useEffect(() => {
+        if (!routeUser) return;
+        try {
+            const serialized = JSON.stringify(routeUser);
+            sessionStorage.setItem("user", serialized);
+            localStorage.setItem("user", serialized);
+        } catch (storageError) {
+            console.warn("Unable to persist farmer session:", storageError);
+        }
+    }, [routeUser]);
 
-    // Do not display the assistant outside the farmer portal.
-    if (!location.pathname.startsWith("/farmer")) {
-        return null;
+    if (!location.pathname.startsWith("/farmer")) return null;
+
+    function addMessage(role, text) {
+        setMessages(previous => [...previous, newMessage(role, text)]);
     }
 
-    function addMessage(role, text, extra = {}) {
-        setMessages(previous => [
-            ...previous,
-            newMessage(role, text, extra)
-        ]);
-    }
+    async function sendToBackend(message, options = {}) {
+        const activeUser = routeUser ?? getStoredUser();
+        const farmerId = getIdFromUser(activeUser);
 
-    async function sendToBackend(
-        message,
-        options = {}
-    ) {
-        const farmerId = getFarmerId();
-
-        if (!farmerId || !Number.isFinite(farmerId)) {
+        if (farmerId === null) {
             throw new Error(
-                "Farmer details were not found. Please log in again."
+                "Farmer ID was not found in the logged-in user. Log out and log in again. Check whether login returns user.id, user.userId, or user.farmerId."
             );
         }
 
@@ -102,21 +99,14 @@ export default function FarmerAssistantWidget() {
             cancelled: options.cancelled ?? false
         };
 
-        const response = await fetch(
-            `${API_BASE}/api/farmer-assistant/message`,
-            {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json"
-                },
-                body: JSON.stringify(payload)
-            }
-        );
+        const response = await fetch(`${API_BASE}/api/farmer-assistant/message`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload)
+        });
 
         const responseText = await response.text();
-
-        let data = {};
-
+        let data;
         try {
             data = responseText ? JSON.parse(responseText) : {};
         } catch {
@@ -125,51 +115,34 @@ export default function FarmerAssistantWidget() {
 
         if (!response.ok) {
             throw new Error(
-                data.message ||
-                data.error ||
-                `Assistant request failed (${response.status}).`
+                data?.message || data?.error || `Assistant request failed (${response.status}).`
             );
         }
-
         return data;
     }
 
     function applyAssistantResponse(data) {
-        const reply =
-            data?.message ||
-            "I received your request, but the server returned no message.";
+        addMessage(
+            "assistant",
+            data?.message || "I received your request, but the server returned no message."
+        );
 
-        addMessage("assistant", reply);
-
-        const nextConversationId = data?.conversationId || null;
+        const nextConversationId = data?.conversationId ?? null;
         const nextStep = data?.nextStep || "";
         const intent = data?.intent || "";
 
-        if (
-            data?.requiresConfirmation ||
-            nextStep.startsWith("CONFIRM_")
-        ) {
+        if (data?.requiresConfirmation || nextStep.startsWith("CONFIRM_")) {
             setConversationId(nextConversationId);
-            setPendingAction({
-                conversationId: nextConversationId,
-                intent
-            });
+            setPendingAction({ conversationId: nextConversationId, intent });
             return;
         }
 
-        // A normal follow-up question may still belong to an active
-        // multi-step conversation.
-        if (
-            nextConversationId &&
-            nextStep &&
-            nextStep !== "COMPLETED"
-        ) {
+        if (nextConversationId && nextStep && nextStep !== "COMPLETED") {
             setConversationId(nextConversationId);
             setPendingAction(null);
             return;
         }
 
-        // Clear the conversation after a successful save or cancellation.
         if (
             nextStep === "COMPLETED" ||
             intent.endsWith("_SAVED") ||
@@ -181,20 +154,13 @@ export default function FarmerAssistantWidget() {
         }
 
         setPendingAction(null);
-
-        // If the server returned a conversation ID without a confirmation
-        // step, retain it for the next question.
         setConversationId(nextConversationId);
     }
 
     async function handleSend(event) {
         event?.preventDefault();
-
         const message = input.trim();
-
-        if (!message || loading || pendingAction) {
-            return;
-        }
+        if (!message || loading || pendingAction) return;
 
         setInput("");
         setError("");
@@ -204,11 +170,8 @@ export default function FarmerAssistantWidget() {
         try {
             const data = await sendToBackend(message);
             applyAssistantResponse(data);
-        } catch (err) {
-            setError(
-                err.message ||
-                "Could not contact the Farmer Assistant."
-            );
+        } catch (sendError) {
+            setError(sendError?.message || "Could not contact the Farmer Assistant.");
         } finally {
             setLoading(false);
         }
@@ -219,21 +182,17 @@ export default function FarmerAssistantWidget() {
 
         setError("");
         setLoading(true);
-        addMessage("user", "Yes, save it.");
+        addMessage("user", "YES");
 
         try {
-            const data = await sendToBackend(
-                "YES",
-                {
-                    conversationId: pendingAction.conversationId,
-                    confirmed: true,
-                    cancelled: false
-                }
-            );
-
+            const data = await sendToBackend("YES", {
+                conversationId: pendingAction.conversationId,
+                confirmed: true,
+                cancelled: false
+            });
             applyAssistantResponse(data);
-        } catch (err) {
-            setError(err.message || "Unable to confirm this action.");
+        } catch (confirmError) {
+            setError(confirmError?.message || "Unable to confirm this action.");
         } finally {
             setLoading(false);
         }
@@ -244,23 +203,19 @@ export default function FarmerAssistantWidget() {
 
         setError("");
         setLoading(true);
-        addMessage("user", "Cancel.");
+        addMessage("user", "NO");
 
         try {
-            const data = await sendToBackend(
-                "NO",
-                {
-                    conversationId: pendingAction.conversationId,
-                    confirmed: false,
-                    cancelled: true
-                }
-            );
-
+            const data = await sendToBackend("NO", {
+                conversationId: pendingAction.conversationId,
+                confirmed: false,
+                cancelled: true
+            });
             applyAssistantResponse(data);
             setConversationId(null);
             setPendingAction(null);
-        } catch (err) {
-            setError(err.message || "Unable to cancel this action.");
+        } catch (cancelError) {
+            setError(cancelError?.message || "Unable to cancel this action.");
         } finally {
             setLoading(false);
         }
@@ -272,146 +227,66 @@ export default function FarmerAssistantWidget() {
         setInput("");
         setError("");
         setMessages([
-            newMessage(
-                "assistant",
-                "Namaste! 🌱 What would you like to do with your farm records?"
-            )
+            newMessage("assistant", "Namaste! 🌱 What would you like to do with your farm records?")
         ]);
     }
 
     return (
         <div className="fa-widget">
             {isOpen && (
-                <section
-                    className="fa-widget-panel"
-                    aria-label="Farmer Assistant"
-                >
+                <section className="fa-widget-panel" aria-label="Farmer Assistant">
                     <header className="fa-widget-header">
                         <div className="fa-widget-header-info">
                             <div className="fa-widget-avatar">🌱</div>
                             <div>
                                 <strong>Farmer Assistant</strong>
-                                <span>Farm records & assistance</span>
+                                <span>Farm records &amp; assistance</span>
                             </div>
                         </div>
-
                         <div className="fa-widget-header-actions">
-                            <button
-                                type="button"
-                                className="fa-widget-icon-button"
-                                onClick={startNewChat}
-                                title="Start a new conversation"
-                                aria-label="Start a new conversation"
-                            >
-                                ↻
-                            </button>
-
-                            <button
-                                type="button"
-                                className="fa-widget-icon-button"
-                                onClick={() => setIsOpen(false)}
-                                title="Close assistant"
-                                aria-label="Close assistant"
-                            >
-                                ×
-                            </button>
+                            <button type="button" className="fa-widget-icon-button" onClick={startNewChat} title="Start a new conversation" aria-label="Start a new conversation">↻</button>
+                            <button type="button" className="fa-widget-icon-button" onClick={() => setIsOpen(false)} title="Close assistant" aria-label="Close assistant">×</button>
                         </div>
                     </header>
 
                     <div className="fa-widget-messages">
                         {messages.map(message => (
-                            <div
-                                key={message.id}
-                                className={
-                                    message.role === "user"
-                                        ? "fa-widget-message-row user"
-                                        : "fa-widget-message-row assistant"
-                                }
-                            >
-                                <div className="fa-widget-message">
-                                    {message.text}
-                                </div>
+                            <div key={message.id} className={`fa-widget-message-row ${message.role === "user" ? "user" : "assistant"}`}>
+                                <div className="fa-widget-message">{message.text}</div>
                             </div>
                         ))}
 
                         {loading && (
                             <div className="fa-widget-loading">
-                                <span />
-                                <span />
-                                <span />
-                                <small>Working...</small>
+                                <span /><span /><span /><small>Working...</small>
                             </div>
                         )}
 
-                        {error && (
-                            <div className="fa-widget-error" role="alert">
-                                {error}
-                            </div>
-                        )}
+                        {error && <div className="fa-widget-error" role="alert">{error}</div>}
 
                         {pendingAction && (
                             <div className="fa-widget-confirm">
                                 <strong>Confirm this action</strong>
-                                <p>
-                                    Please review the details above before
-                                    saving them to your farm records.
-                                </p>
-
+                                <p>Please review the details above before saving them to your farm records.</p>
                                 <div className="fa-widget-confirm-actions">
-                                    <button
-                                        type="button"
-                                        className="fa-widget-confirm-yes"
-                                        onClick={confirmAction}
-                                        disabled={loading}
-                                    >
-                                        Yes, save
-                                    </button>
-
-                                    <button
-                                        type="button"
-                                        className="fa-widget-confirm-no"
-                                        onClick={cancelAction}
-                                        disabled={loading}
-                                    >
-                                        Cancel
-                                    </button>
+                                    <button type="button" className="fa-widget-confirm-yes" onClick={confirmAction} disabled={loading}>Yes, save</button>
+                                    <button type="button" className="fa-widget-confirm-no" onClick={cancelAction} disabled={loading}>Cancel</button>
                                 </div>
                             </div>
                         )}
                     </div>
 
-                    <form
-                        className="fa-widget-input-area"
-                        onSubmit={handleSend}
-                    >
+                    <form className="fa-widget-input-area" onSubmit={handleSend}>
                         <input
                             value={input}
                             onChange={event => setInput(event.target.value)}
-                            placeholder={
-                                pendingAction
-                                    ? "Confirm or cancel above"
-                                    : "Ask about your farm..."
-                            }
+                            placeholder={pendingAction ? "Confirm or cancel above" : "Ask about your farm..."}
                             disabled={loading || Boolean(pendingAction)}
                             aria-label="Message Farmer Assistant"
                         />
-
-                        <button
-                            type="submit"
-                            disabled={
-                                loading ||
-                                Boolean(pendingAction) ||
-                                !input.trim()
-                            }
-                            aria-label="Send message"
-                        >
-                            ➤
-                        </button>
+                        <button type="submit" disabled={loading || Boolean(pendingAction) || !input.trim()} aria-label="Send message">➤</button>
                     </form>
-
-                    <footer className="fa-widget-footer">
-                        Answers use records saved in your farm system.
-                    </footer>
+                    <footer className="fa-widget-footer">Answers use records saved in your farm system.</footer>
                 </section>
             )}
 
@@ -419,11 +294,7 @@ export default function FarmerAssistantWidget() {
                 type="button"
                 className="fa-widget-launcher"
                 onClick={() => setIsOpen(open => !open)}
-                aria-label={
-                    isOpen
-                        ? "Close Farmer Assistant"
-                        : "Open Farmer Assistant"
-                }
+                aria-label={isOpen ? "Close Farmer Assistant" : "Open Farmer Assistant"}
             >
                 {isOpen ? "×" : "🌱"}
                 {!isOpen && <span>Farmer Assistant</span>}
