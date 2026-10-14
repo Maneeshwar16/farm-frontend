@@ -40,6 +40,18 @@ function LoginPage() {
 
             console.log("Login successful", data);
 
+            // Clear old session to avoid role or farmerId cross-contamination
+            sessionStorage.clear();
+            localStorage.removeItem("user");
+            localStorage.removeItem("currentUser");
+            localStorage.removeItem("loggedInUser");
+            localStorage.removeItem("farmer");
+            localStorage.removeItem("userData");
+
+            // Store current user session
+            sessionStorage.setItem("user", JSON.stringify(data));
+            localStorage.setItem("user", JSON.stringify(data));
+
             if (data.role === "FARMER") {
                 navigate("/farmer", { state: { user: data } });
             } else if (

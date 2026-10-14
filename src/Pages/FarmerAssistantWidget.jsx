@@ -7,25 +7,64 @@ const API_BASE = (
 
 const STORAGE_KEYS = ["user", "currentUser", "loggedInUser", "farmer", "userData"];
 
+
 function getIdFromUser(user) {
-    if (!user || typeof user !== "object") return null;
+    if (!user || typeof user !== "object") {
+        return null;
+    }
 
     const candidates = [
-        user.farmerId, user.userId, user.id,
-        user.user?.farmerId, user.user?.userId, user.user?.id,
-        user.data?.farmerId, user.data?.userId, user.data?.id
+        user.id,
+        user.userId,
+        user.farmerId,
+        user.user?.id,
+        user.user?.userId,
+        user.user?.farmerId,
+        user.data?.id,
+        user.data?.userId,
+        user.data?.farmerId
     ];
 
     for (const value of candidates) {
-        if (value !== undefined && value !== null && String(value).trim() !== "") {
+        if (
+            value !== undefined &&
+            value !== null &&
+            String(value).trim() !== ""
+        ) {
             const id = Number(value);
-            if (Number.isFinite(id) && id > 0) return id;
+
+            if (Number.isSafeInteger(id) && id > 0) {
+                return id;
+            }
+        }
+    }
+
+    return null;
+}
+
+
+function getStoredFarmerUser() {
+    for (const storage of [sessionStorage, localStorage]) {
+        for (const key of STORAGE_KEYS) {
+            try {
+                const raw = storage.getItem(key);
+                if (!raw) continue;
+                const parsed = JSON.parse(raw);
+                if (parsed && (parsed.role === "FARMER" || parsed.user?.role === "FARMER")) {
+                    return parsed;
+                }
+            } catch {
+                // Try the next key.
+            }
         }
     }
     return null;
 }
 
 function getStoredUser() {
+    const farmer = getStoredFarmerUser();
+    if (farmer) return farmer;
+
     for (const storage of [sessionStorage, localStorage]) {
         for (const key of STORAGE_KEYS) {
             try {
@@ -58,7 +97,7 @@ export default function FarmerAssistantWidget() {
     const [messages, setMessages] = useState([
         newMessage(
             "assistant",
-            "Namaste! 🌱 I'm your Farmer Assistant.\n\nYou can ask about your crops, record expenses, list products, or record a harvest."
+            "Namaste! 🌱 I'm your Farmer Assistant.\n\nYou can ask to view your crops, add or delete crops, list products, record expenses, or record a harvest."
         )
     ]);
 
@@ -82,12 +121,15 @@ export default function FarmerAssistantWidget() {
     }
 
     async function sendToBackend(message, options = {}) {
-        const activeUser = routeUser ?? getStoredUser();
+        const activeUser = (routeUser && routeUser.role === "FARMER" ? routeUser : null)
+            ?? getStoredFarmerUser()
+            ?? routeUser
+            ?? getStoredUser();
         const farmerId = getIdFromUser(activeUser);
 
         if (farmerId === null) {
             throw new Error(
-                "Farmer ID was not found in the logged-in user. Log out and log in again. Check whether login returns user.id, user.userId, or user.farmerId."
+                "Farmer ID was not found in the logged-in user. Log out and log in again as a farmer."
             );
         }
 
@@ -146,10 +188,16 @@ export default function FarmerAssistantWidget() {
         if (
             nextStep === "COMPLETED" ||
             intent.endsWith("_SAVED") ||
+            intent.endsWith("_DELETED") ||
             intent === "CANCELLED"
         ) {
             setConversationId(null);
             setPendingAction(null);
+
+            // Notify open pages (e.g. MyCrop, Products) that database records changed
+            if (intent.endsWith("_SAVED") || intent.endsWith("_DELETED")) {
+                window.dispatchEvent(new CustomEvent("farmDataUpdated", { detail: { intent } }));
+            }
             return;
         }
 

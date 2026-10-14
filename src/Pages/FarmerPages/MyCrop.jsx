@@ -4,9 +4,21 @@ import LogoutButton from "../LogoutButton";
 
 
 const API_URL = `${import.meta.env.VITE_API_URL || "http://localhost:8080"}/crops`;
-const MAX_CROPS = 6;
+const MAX_CROPS = 10;
 
 function getSavedUser() {
+    for (const storage of [sessionStorage, localStorage]) {
+        for (const key of ["user", "currentUser", "farmer", "loggedInUser"]) {
+            try {
+                const raw = storage.getItem(key);
+                if (!raw) continue;
+                const parsed = JSON.parse(raw);
+                if (parsed && (parsed.role === "FARMER" || parsed.user?.role === "FARMER")) {
+                    return parsed;
+                }
+            } catch { }
+        }
+    }
     try {
         return (
             JSON.parse(sessionStorage.getItem("user") || "null") ||
@@ -97,7 +109,41 @@ const MyCrop = () => {
 
     useEffect(() => {
         loadCrops();
+
+        const handleFarmDataUpdated = () => {
+            loadCrops();
+        };
+
+        window.addEventListener("farmDataUpdated", handleFarmDataUpdated);
+        return () => {
+            window.removeEventListener("farmDataUpdated", handleFarmDataUpdated);
+        };
     }, [farmerId]);
+
+    async function deleteCrop(cropId, cropName) {
+        if (!window.confirm(`Are you sure you want to delete crop "${cropName}"?`)) {
+            return;
+        }
+
+        try {
+            setLoading(true);
+            const response = await fetch(`${API_URL}/${cropId}`, {
+                method: "DELETE"
+            });
+
+            if (!response.ok) {
+                throw new Error("Failed to delete crop.");
+            }
+
+            setCrops(prev => prev.filter(c => c.id !== cropId));
+            showMessage(`Crop "${cropName}" deleted successfully! 🗑️`);
+            window.dispatchEvent(new CustomEvent("farmDataUpdated", { detail: { intent: "CROP_DELETED" } }));
+        } catch (error) {
+            showMessage(error.message || "Could not delete crop.", "error");
+        } finally {
+            setLoading(false);
+        }
+    }
 
     async function saveCrop(event) {
         event.preventDefault();
@@ -343,8 +389,7 @@ const MyCrop = () => {
                                     </strong>
                                 </div>
 
-                                <div className="my-crop-footer">
-                                    <span>Growing Well 🌿</span>
+                                <div className="my-crop-footer" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "8px" }}>
                                     <button
                                         type="button"
                                         className="crops-secondary-button"
@@ -356,6 +401,27 @@ const MyCrop = () => {
                                         }
                                     >
                                         View Harvests →
+                                    </button>
+                                    <button
+                                        type="button"
+                                        className="crops-delete-button"
+                                        style={{
+                                            backgroundColor: "#dc2626",
+                                            color: "#ffffff",
+                                            border: "none",
+                                            borderRadius: "6px",
+                                            padding: "6px 12px",
+                                            cursor: "pointer",
+                                            fontWeight: "600",
+                                            fontSize: "0.85rem",
+                                            display: "inline-flex",
+                                            alignItems: "center",
+                                            gap: "4px"
+                                        }}
+                                        onClick={() => deleteCrop(crop.id, crop.cropName)}
+                                        title="Delete this crop"
+                                    >
+                                        🗑️ Delete
                                     </button>
                                 </div>
                             </article>
