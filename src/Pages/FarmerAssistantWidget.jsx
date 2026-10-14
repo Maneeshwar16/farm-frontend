@@ -84,6 +84,41 @@ function newMessage(role, text) {
     return { id: `${Date.now()}-${Math.random()}`, role, text };
 }
 
+function renderFormattedText(text) {
+    if (!text) return null;
+    const lines = text.split("\n");
+    return lines.map((line, lIdx) => {
+        const parts = [];
+        const regex = /(\*\*.*?\*\*|\*.*?\*)/g;
+        let match;
+        let lastIndex = 0;
+        let pIdx = 0;
+
+        while ((match = regex.exec(line)) !== null) {
+            if (match.index > lastIndex) {
+                parts.push(line.substring(lastIndex, match.index));
+            }
+            const token = match[0];
+            if (token.startsWith("**") && token.endsWith("**")) {
+                parts.push(<strong key={`b-${pIdx++}`}>{token.slice(2, -2)}</strong>);
+            } else if (token.startsWith("*") && token.endsWith("*")) {
+                parts.push(<em key={`i-${pIdx++}`}>{token.slice(1, -1)}</em>);
+            }
+            lastIndex = regex.lastIndex;
+        }
+
+        if (lastIndex < line.length) {
+            parts.push(line.substring(lastIndex));
+        }
+
+        return (
+            <span key={lIdx} style={{ display: "block", minHeight: line.trim() ? "auto" : "0.5em" }}>
+                {parts.length > 0 ? parts : "\u00A0"}
+            </span>
+        );
+    });
+}
+
 export default function FarmerAssistantWidget() {
     const location = useLocation();
     const routeUser = location.state?.user ?? null;
@@ -208,15 +243,60 @@ export default function FarmerAssistantWidget() {
     async function handleSend(event) {
         event?.preventDefault();
         const message = input.trim();
-        if (!message || loading || pendingAction) return;
+        if (!message || loading) return;
 
         setInput("");
         setError("");
         addMessage("user", message);
         setLoading(true);
 
+        const lower = message.toLowerCase();
+
+        // If a pending confirmation was waiting and user typed yes/save/confirm
+        if (pendingAction && (lower === "yes" || lower === "y" || lower === "save" || lower === "confirm" || lower === "sure" || lower === "ok")) {
+            try {
+                const data = await sendToBackend("YES", {
+                    conversationId: pendingAction.conversationId,
+                    confirmed: true,
+                    cancelled: false
+                });
+                applyAssistantResponse(data);
+            } catch (confirmError) {
+                setError(confirmError?.message || "Unable to confirm this action.");
+            } finally {
+                setLoading(false);
+            }
+            return;
+        }
+
+        // If a pending confirmation was waiting and user typed no/cancel
+        if (pendingAction && (lower === "no" || lower === "n" || lower === "cancel" || lower === "stop")) {
+            try {
+                const data = await sendToBackend("NO", {
+                    conversationId: pendingAction.conversationId,
+                    confirmed: false,
+                    cancelled: true
+                });
+                applyAssistantResponse(data);
+                setConversationId(null);
+                setPendingAction(null);
+            } catch (cancelError) {
+                setError(cancelError?.message || "Unable to cancel this action.");
+            } finally {
+                setLoading(false);
+            }
+            return;
+        }
+
+        // If user typed a brand new question while pending action was waiting, clear pending action
+        const activeConvId = pendingAction ? null : conversationId;
+        if (pendingAction) {
+            setPendingAction(null);
+            setConversationId(null);
+        }
+
         try {
-            const data = await sendToBackend(message);
+            const data = await sendToBackend(message, { conversationId: activeConvId });
             applyAssistantResponse(data);
         } catch (sendError) {
             setError(sendError?.message || "Could not contact the Farmer Assistant.");
@@ -300,7 +380,7 @@ export default function FarmerAssistantWidget() {
                     <div className="fa-widget-messages">
                         {messages.map(message => (
                             <div key={message.id} className={`fa-widget-message-row ${message.role === "user" ? "user" : "assistant"}`}>
-                                <div className="fa-widget-message">{message.text}</div>
+                                <div className="fa-widget-message">{renderFormattedText(message.text)}</div>
                             </div>
                         ))}
 
@@ -328,11 +408,11 @@ export default function FarmerAssistantWidget() {
                         <input
                             value={input}
                             onChange={event => setInput(event.target.value)}
-                            placeholder={pendingAction ? "Confirm or cancel above" : "Ask about your farm..."}
-                            disabled={loading || Boolean(pendingAction)}
+                            placeholder={pendingAction ? "Reply YES / Cancel or ask something else..." : "Ask about your farm..."}
+                            disabled={loading}
                             aria-label="Message Farmer Assistant"
                         />
-                        <button type="submit" disabled={loading || Boolean(pendingAction) || !input.trim()} aria-label="Send message">➤</button>
+                        <button type="submit" disabled={loading || !input.trim()} aria-label="Send message">➤</button>
                     </form>
                     <footer className="fa-widget-footer">Answers use records saved in your farm system.</footer>
                 </section>

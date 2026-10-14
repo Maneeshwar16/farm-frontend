@@ -78,6 +78,14 @@ const MyFarm = () => {
         loadFarms();
     }, [loadFarms]);
 
+    useEffect(() => {
+        const handleUpdate = () => {
+            loadFarms();
+        };
+        window.addEventListener("farmDataUpdated", handleUpdate);
+        return () => window.removeEventListener("farmDataUpdated", handleUpdate);
+    }, [loadFarms]);
+
     function handleChange(event) {
         const { name, value } = event.target;
 
