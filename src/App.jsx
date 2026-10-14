@@ -26,6 +26,7 @@ import RegisterPage from "./Pages/RegisterPage";
 import LoginPage from "./Pages/LoginPage";
 import HomePage from "./Pages/HomePage";
 import LogoutButton from "./Pages/LogoutButton";
+import FarmerAssistantWidget from "./Pages/FarmerAssistantWidget";
 import FarmerPage from "./Pages/FarmerPage";
 import CustomerPage from "./Pages/CustomerPage";
 import MyHarvest from "./Pages/FarmerPages/MyHarvest";
@@ -49,6 +50,7 @@ import Marketplace from "./Pages/FarmerPages/Marketplace";
 import FarmerOrders from "./Pages/FarmerPages/FarmerOrders";
 import FarmerExpenses from "./Pages/FarmerPages/FarmerExpenses";
 import FarmerProfile from "./Pages/CustomerPages/FarmerProfile";
+
 
 function App() {
   return (
@@ -263,7 +265,15 @@ function App() {
           path="/customer/farmer/:farmerId"
           element={<FarmerProfile />}
         />
+                <Route
+          path="/customer/farmer/:farmerId"
+          element={<FarmerProfile />}
+        />
+
       </Routes>
+
+      <FarmerAssistantWidget />
+
     </BrowserRouter>
   );
 }

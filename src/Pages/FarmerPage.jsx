@@ -160,7 +160,15 @@ function FarmerPage() {
                         ))}
                     </div>
                 </section>
-
+                <button
+                    type="button"
+                    className="farmer-assistant-float-button"
+                    onClick={() => navigate("/farmer-assistant")}
+                    aria-label="Open Farmer Assistant"
+                >
+                    <span className="farmer-assistant-float-icon">🌱</span>
+                    <span>Farmer Assistant</span>
+                </button>
                 <footer className="farmer-dashboard-footer">
                     <span>🌿 Farming Management</span>
                     <p>Supporting smarter and more sustainable farming.</p>
