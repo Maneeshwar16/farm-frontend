@@ -76,7 +76,7 @@ function FarmerPage() {
                 <section className="farmer-dashboard-welcome">
                     <div className="farmer-dashboard-welcome-content">
                         <span className="farmer-dashboard-eyebrow">YOUR FARMING JOURNEY</span>
-                        <h1>Welcome back, <span>{user?.name || "Farmer"}</span>! 🌾</h1>
+                        <h1>Welcome back, <span>{user?.name || "Farmer"}</span></h1>
                         <p>
                             Manage your farms, monitor your crops, track expenses and bring your produce to market — all in one place.
                         </p>

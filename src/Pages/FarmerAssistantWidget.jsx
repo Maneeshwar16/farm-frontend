@@ -132,7 +132,7 @@ export default function FarmerAssistantWidget() {
     const [messages, setMessages] = useState([
         newMessage(
             "assistant",
-            "Namaste! 🌱 I'm your Farmer Assistant.\n\nYou can ask to view your crops, add or delete crops, list products, record expenses, or record a harvest."
+            "Namaste! 🌱 I'm your Farmer Assistant.\n\nYou can ask to view crops, add crops, edit crop status, list products, record expenses, or record a harvest."
         )
     ]);
 
@@ -224,13 +224,14 @@ export default function FarmerAssistantWidget() {
             nextStep === "COMPLETED" ||
             intent.endsWith("_SAVED") ||
             intent.endsWith("_DELETED") ||
+            intent.endsWith("_UPDATED") ||
             intent === "CANCELLED"
         ) {
             setConversationId(null);
             setPendingAction(null);
 
             // Notify open pages (e.g. MyCrop, Products) that database records changed
-            if (intent.endsWith("_SAVED") || intent.endsWith("_DELETED")) {
+            if (intent.endsWith("_SAVED") || intent.endsWith("_DELETED") || intent.endsWith("_UPDATED")) {
                 window.dispatchEvent(new CustomEvent("farmDataUpdated", { detail: { intent } }));
             }
             return;

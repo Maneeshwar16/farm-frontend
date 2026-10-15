@@ -57,7 +57,7 @@ function CustomerPage() {
                     </span>
 
                     <h1>
-                        Hey, {user?.name || "there"}! <span>👋</span>
+                        Hey, {user?.name || "there"}!
                     </h1>
 
                     <p>
